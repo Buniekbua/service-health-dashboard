@@ -231,3 +231,90 @@ func TestAddURLHandler(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoveURLHandler(t *testing.T) {
+	type requestBody struct {
+		URL string `json:"url"`
+	}
+
+	cases := []struct {
+		name           string
+		method         string
+		body           string
+		wantStatus     int
+		preDeletedURLs []string
+		wantInURLs     []string
+	}{
+		{
+			name:           "valid DELETE",
+			method:         http.MethodDelete,
+			body:           `{"url":"https://example.com"}`,
+			wantStatus:     http.StatusOK,
+			preDeletedURLs: []string{"https://example.com", "https://keepthisurl.com"},
+			wantInURLs:     []string{"https://keepthisurl.com"},
+		},
+		{
+			name:       "empty body",
+			method:     http.MethodDelete,
+			body:       ``,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid json",
+			method:     http.MethodDelete,
+			body:       `{"url":`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := storage.NewStorage()
+
+			for _, url := range tc.preDeletedURLs {
+				s.AddURL(url)
+			}
+
+			req := httptest.NewRequest(tc.method, "/urls", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			handler := RemoveURLHandler(s)
+			handler.ServeHTTP(w, req)
+
+			res := w.Result()
+			if res.StatusCode != tc.wantStatus {
+				t.Errorf("Expected status: %d, got: %d", tc.wantStatus, res.StatusCode)
+			}
+
+			if tc.wantStatus == http.StatusOK {
+
+				var reqData requestBody
+				if err := json.Unmarshal([]byte(tc.body), &reqData); err != nil {
+					t.Fatalf("Failed to unmarshal JSON request body: %v", err)
+				}
+				urls := s.GetURLs()
+
+				for _, u := range urls {
+					if u == reqData.URL {
+						t.Errorf("URL %q should have been removed but is still present", reqData.URL)
+					}
+				}
+
+				for _, wantURL := range tc.wantInURLs {
+					found := false
+					for _, u := range urls {
+						if u == wantURL {
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						t.Errorf("Expected URL %q to remain but was not found", wantURL)
+					}
+				}
+			}
+		})
+	}
+}
