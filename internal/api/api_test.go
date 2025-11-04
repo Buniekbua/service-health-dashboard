@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/buniekbua/service-health-dashboard/internal/monitor"
@@ -158,5 +159,75 @@ func TestIntegration_MonitorAndAPI(t *testing.T) {
 	}
 	if data[testSrv.URL] != 200 {
 		t.Errorf("Expected status 200, got %d", data[testSrv.URL])
+	}
+}
+
+func TestAddURLHandler(t *testing.T) {
+	cases := []struct {
+		name       string
+		method     string
+		body       string
+		wantStatus int
+		wantInURLs []string
+	}{
+		{
+			name:       "valid POST",
+			method:     http.MethodPost,
+			body:       `{"url":"https://example.com"}`,
+			wantStatus: http.StatusCreated,
+			wantInURLs: []string{"https://example.com"},
+		},
+		{
+			name:       "empty body",
+			method:     http.MethodPost,
+			body:       "",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid json",
+			method:     http.MethodPost,
+			body:       `{"url":`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "wrong method GET",
+			method:     http.MethodGet,
+			body:       ``,
+			wantStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := storage.NewStorage()
+
+			req := httptest.NewRequest(tc.method, "/urls", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			handler := AddURLHandler(s)
+			handler.ServeHTTP(w, req)
+
+			res := w.Result()
+			if res.StatusCode != tc.wantStatus {
+				t.Errorf("Expected status: %d, got: %d", tc.wantStatus, res.StatusCode)
+			}
+
+			if tc.wantStatus == http.StatusCreated {
+				urls := s.GetURLs()
+				for _, expectedURL := range tc.wantInURLs {
+					found := false
+					for _, u := range urls {
+						if u == expectedURL {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("Expected URL %q to be added, but it was not present", expectedURL)
+					}
+				}
+			}
+		})
 	}
 }
